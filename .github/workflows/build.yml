@@ -683,6 +683,56 @@ jobs:
 
           echo "已更新 get_ksu_version_full 模板: $VERSION_TEMPLATE"
 
+      - name: 对齐 KSU 版本号与 UAPI 版本
+        if: inputs.ksu_variant == 'SukiSU' && inputs.ksu_mode != '禁用KSU'
+        working-directory: ${{ env.KERNEL_ROOT }}/KernelSU
+        run: |
+          set -euo pipefail
+
+          TARGET_KSU_VERSION=40994
+          TARGET_UAPI=5
+
+          # main 分支的 kernel/include/uapi 是符号链接，必须 realpath 后改真实文件
+          UAPI_FILE=""
+          for f in uapi/supercall.h kernel/include/uapi/supercall.h; do
+            if [ -f "$f" ] && [ ! -L "$f" ]; then
+              UAPI_FILE="$(realpath "$f")"
+              break
+            fi
+          done
+          if [ -z "$UAPI_FILE" ]; then
+            echo "::error::未找到 supercall.h，uapi 布局异常" >&2
+            ls -l uapi kernel/include/uapi 2>/dev/null || true
+            exit 1
+          fi
+          echo "UAPI 头文件: $UAPI_FILE"
+          grep -n 'KERNEL_SU_UAPI_VERSION' "$UAPI_FILE" || true
+
+          # DECLARE 风格（builtin）与 static const 风格（main）两种写法都覆盖
+          sed -i -E "s/(KERNEL_SU_UAPI_VERSION[[:space:]]*,[[:space:]]*)[0-9]+/\1${TARGET_UAPI}/" "$UAPI_FILE"
+          sed -i -E "s/(KERNEL_SU_UAPI_VERSION[[:space:]]*=[[:space:]]*)[0-9]+/\1${TARGET_UAPI}/" "$UAPI_FILE"
+
+          if ! grep -qE "KERNEL_SU_UAPI_VERSION[[:space:]]*[=,][[:space:]]*${TARGET_UAPI}([^0-9]|$)" "$UAPI_FILE"; then
+            echo "::error::UAPI 版本改写失败" >&2
+            grep -n 'KERNEL_SU_UAPI_VERSION' "$UAPI_FILE" || true
+            exit 1
+          fi
+
+          # builtin 的版本定义在 kernel/Makefile，main 在 kernel/Kbuild
+          PINNED=0
+          for vf in kernel/Makefile kernel/Kbuild; do
+            if [ -f "$vf" ] && grep -qE '^KSU_VERSION[[:space:]]*:=' "$vf"; then
+              sed -i -E "s|^KSU_VERSION[[:space:]]*:=.*|KSU_VERSION     := ${TARGET_KSU_VERSION}|" "$vf"
+              grep -nE '^KSU_VERSION[[:space:]]*:=' "$vf"
+              PINNED=1
+            fi
+          done
+          if [ "$PINNED" -ne 1 ]; then
+            echo "::error::未找到 KSU_VERSION 定义（kernel/Makefile 或 kernel/Kbuild）" >&2
+            exit 1
+          fi
+
+          echo "已对齐: KSU_VERSION=${TARGET_KSU_VERSION}, KERNEL_SU_UAPI_VERSION=${TARGET_UAPI}"
       # 在内核源码和 KSU 准备完成后再获取 SUSFS，避免在前期集中拉取。
       - name: 克隆 SUSFS 源码
         if: inputs.enable_susfs

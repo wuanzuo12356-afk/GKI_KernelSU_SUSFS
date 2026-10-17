@@ -93,7 +93,12 @@ jobs:
           KSU_GIT_VERSION=$(git rev-list --count HEAD)
 
           if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            KSU_VERSION=$((40000 + KSU_GIT_VERSION - 2815))
+            # 与 build.yml「对齐 KSU 版本号与 UAPI 版本」步骤保持一致：
+            # 内核侧已把 KSU_VERSION 钉死为 40994，此处同步钉死，
+            # 才能让 get-manager 挑到版本号相同的 Manager 产物（40994-5）。
+            # 想恢复动态计算，把这行改回：
+            #   KSU_VERSION=$((40000 + KSU_GIT_VERSION - 2815))
+            KSU_VERSION=40994
           elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU(40726)" ]; then
             KSU_VERSION=40726
           elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU(40548)" ]; then
